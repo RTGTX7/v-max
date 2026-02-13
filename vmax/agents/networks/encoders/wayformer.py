@@ -40,6 +40,9 @@ class WayformerAttention(nn.Module):
     ff_mult: int = 1
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x, mask=None):
@@ -53,6 +56,7 @@ class WayformerAttention(nn.Module):
             Output tensor.
 
         """
+        x = x.astype(self.compute_dtype)
         bs, dim = x.shape[0], x.shape[-1]
         latents = self.param("latents", init.normal(), (self.num_latents, dim * self.ff_mult))
         latent = einops.repeat(latents, "n d -> b n d", b=bs)
@@ -63,8 +67,18 @@ class WayformerAttention(nn.Module):
             heads=self.num_heads,
             head_features=self.head_features,
             dropout=self.attn_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
-        ff = partial(encoders.FeedForward, mult=self.ff_mult, dropout=self.ff_dropout)
+        ff = partial(
+            encoders.FeedForward,
+            mult=self.ff_mult,
+            dropout=self.ff_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
+        )
         rz = encoders.ReZero(name="rezero_0")
         latent += rz(attn(name="attn_0")(latent, x, mask_k=mask))
         latent += rz(ff(name="ff_0")(latent))
@@ -74,7 +88,7 @@ class WayformerAttention(nn.Module):
             latent += rz(attn(name=f"attn_{i}")(latent))
             latent += rz(ff(name=f"ff_{i}")(latent))
 
-        return latent
+        return latent.astype(self.output_dtype)
 
 
 class WayformerEncoder(nn.Module):
@@ -110,6 +124,9 @@ class WayformerEncoder(nn.Module):
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
     fusion_type: str = "late"
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, obs: jax.Array) -> jax.Array:
@@ -141,6 +158,9 @@ class WayformerEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "sdc_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         other_traj_encoding = encoders.build_mlp_embedding(
             other_traj_features,
@@ -148,6 +168,9 @@ class WayformerEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "other_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         rg_encoding = encoders.build_mlp_embedding(
             rg_features,
@@ -155,6 +178,9 @@ class WayformerEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "rg_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         tl_encoding = encoders.build_mlp_embedding(
             tl_features,
@@ -162,6 +188,9 @@ class WayformerEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "tl_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         gps_path_encoding = encoders.build_mlp_embedding(
             gps_path_features,
@@ -169,17 +198,32 @@ class WayformerEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "gps_path_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
 
         # Positional Encoding - Page 3 paper
-        sdc_traj_encoding += jnp.expand_dims(self.param("sdc_traj_pe", init.normal(), (1, timestep_agent, self.dk)), 0)
-        other_traj_encoding += jnp.expand_dims(
-            self.param("other_traj_pe", init.normal(), (num_objects, timestep_agent, self.dk)),
+        sdc_traj_encoding += jnp.expand_dims(
+            self.param("sdc_traj_pe", init.normal(), (1, timestep_agent, self.dk)).astype(self.compute_dtype),
             0,
         )
-        rg_encoding += jnp.expand_dims(self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)), 0)
-        tl_encoding += jnp.expand_dims(self.param("tj_pe", init.normal(), (num_light, timestep_tl, self.dk)), 0)
-        gps_path_encoding += jnp.expand_dims(self.param("gps_path_pe", init.normal(), (target_len, self.dk)), 0)
+        other_traj_encoding += jnp.expand_dims(
+            self.param("other_traj_pe", init.normal(), (num_objects, timestep_agent, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        rg_encoding += jnp.expand_dims(
+            self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        tl_encoding += jnp.expand_dims(
+            self.param("tj_pe", init.normal(), (num_light, timestep_tl, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        gps_path_encoding += jnp.expand_dims(
+            self.param("gps_path_pe", init.normal(), (target_len, self.dk)).astype(self.compute_dtype),
+            0,
+        )
 
         # Temporal Encoding
         temp_pe_agents = self.param("temp_pe_agents", init.normal(), (timestep_agent,))
@@ -208,6 +252,9 @@ class WayformerEncoder(nn.Module):
             ff_mult=self.ff_mult,
             attn_dropout=self.attn_dropout,
             ff_dropout=self.ff_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
 
         # Early Fusion - fuse after attention for all types of features
@@ -281,4 +328,4 @@ class WayformerEncoder(nn.Module):
 
         # average over latent dimensions
         output = output.mean(axis=1)
-        return output
+        return output.astype(self.output_dtype)

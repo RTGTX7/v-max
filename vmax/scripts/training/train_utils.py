@@ -75,6 +75,15 @@ def apply_xla_flags(config: dict) -> None:
 
     os.environ["XLA_FLAGS"] = xla_flags
 
+    # Control JAX GPU memory fraction if provided (default 0.95 in base_config)
+    gpu_mem_fraction = config.get("gpu_mem_fraction", None)
+    if gpu_mem_fraction is not None:
+        os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = str(gpu_mem_fraction)
+
+    preallocate = config.get("xla_python_client_preallocate", None)
+    if preallocate is not None:
+        os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = str(preallocate).lower()
+
     if config["cache_flag"]:
         jax.config.update("jax_compilation_cache_dir", "/tmp/jax_cache")
         jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)
@@ -150,7 +159,26 @@ def build_config_dicts(config: dict) -> tuple[dict, dict]:
     if config["network"]["encoder"]["type"] != "none":
         config["network"]["unflatten_config"] = config["observation_config"]
 
+    training_config = config.get("training", {})
+    legacy_mixed_precision = bool(training_config.get("mixed_precision", False))
+    legacy_mp_dtype = str(training_config.get("mp_dtype", "bf16")).lower()
+    default_compute_dtype = legacy_mp_dtype if legacy_mixed_precision else "fp32"
+    compute_dtype = str(training_config.get("compute_dtype", default_compute_dtype)).lower()
+    encoder_compute_dtype = str(training_config.get("encoder_compute_dtype", compute_dtype)).lower()
+    cast_encoder_inputs = bool(
+        training_config.get("cast_encoder_inputs", encoder_compute_dtype in ("bf16", "bfloat16")),
+    )
+
     network_config = config["network"]
+    network_config["dtype_policy"] = {
+        # Legacy keys are kept for backward compatibility with existing scripts.
+        "mixed_precision": legacy_mixed_precision,
+        "mp_dtype": legacy_mp_dtype,
+        # New keys support split precision between encoder and policy/value heads.
+        "compute_dtype": compute_dtype,
+        "encoder_compute_dtype": encoder_compute_dtype,
+        "cast_encoder_inputs": cast_encoder_inputs,
+    }
     del config["algorithm"]["network"]
 
     if network_config["value"]["layer_sizes"] is None:
@@ -184,6 +212,15 @@ def print_hyperparameters(args: dict) -> None:
     print(" Experiment Summary ".center(40, "="))
     print(f"- Algorithm          : {args['algorithm']['name']}")
     print(f"- Observation Type   : {args['observation_type']}")
+    print(f"- Encoder            : {args['network']['encoder']['type']}")
+    mp_cfg = args.get("training", {})
+    legacy_mp_enabled = bool(mp_cfg.get("mixed_precision", False))
+    legacy_mp_dtype = str(mp_cfg.get("mp_dtype", "bf16")).lower()
+    default_compute_dtype = legacy_mp_dtype if legacy_mp_enabled else "fp32"
+    compute_dtype = str(mp_cfg.get("compute_dtype", default_compute_dtype)).lower()
+    encoder_compute_dtype = str(mp_cfg.get("encoder_compute_dtype", compute_dtype)).lower()
+    print(f"- Compute DType      : {compute_dtype}")
+    print(f"- Encoder DType      : {encoder_compute_dtype}")
     print(f"- Dataset Path       : {args['path_dataset']}")
     print(f"- Total Timesteps    : {args['total_timesteps']}")
 

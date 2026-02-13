@@ -6,7 +6,7 @@ name: BC
 unroll_length: 80
 learning_rate: 1e-4
 batch_size: 64
-grad_updates_per_step: 8
+grad_updates_per_step: 32
 loss_type: mse  # options: 'mae', 'mse'
 buffer_size: 1_000_000
 

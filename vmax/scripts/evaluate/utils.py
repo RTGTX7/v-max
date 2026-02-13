@@ -302,8 +302,12 @@ def load_params(path: str) -> Any:
 def get_model_path(model_path: str) -> tuple[str, str]:
     """Identify and return the latest model file path and its name with caching."""
     try:
-        # Filter to get only files with .pkl extension
-        pkl_files = [f for f in os.listdir(model_path) if f.endswith(".pkl")]
+        # Filter to get only model weights (avoid full checkpoint files)
+        pkl_files = [
+            f
+            for f in os.listdir(model_path)
+            if f.endswith(".pkl") and f.startswith("model_")
+        ]
 
         if "model_final.pkl" in pkl_files:
             model_name = "model_final.pkl"

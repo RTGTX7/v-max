@@ -41,6 +41,9 @@ class MTRAttention(nn.Module):
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
     k: int = 8
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, latent, x, mask_latent=None, mask_x=None):
@@ -56,16 +59,26 @@ class MTRAttention(nn.Module):
             Updated latent tensor.
 
         """
-        x = einops.rearrange(x, "b n ... -> b n (...)")
-        latent = einops.rearrange(latent, "b n ... -> b n (...)")
+        x = einops.rearrange(x, "b n ... -> b n (...)").astype(self.compute_dtype)
+        latent = einops.rearrange(latent, "b n ... -> b n (...)").astype(self.compute_dtype)
 
         attn = partial(
             encoders.LocalAttentionLayer,
             heads=self.num_heads,
             head_features=self.head_features,
             dropout=self.attn_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
-        ff = partial(encoders.FeedForward, mult=self.ff_mult, dropout=self.ff_dropout)
+        ff = partial(
+            encoders.FeedForward,
+            mult=self.ff_mult,
+            dropout=self.ff_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
+        )
 
         knn = jax.vmap(lambda x, y, mask_y=None: encoders.nearest_neighbors_jax(x, y, self.k, mask_y))
 
@@ -79,7 +92,7 @@ class MTRAttention(nn.Module):
             latent += rz(attn(name=f"attn_{i}")(latent, x, index_pairs, mask_k=mask_x))
             latent += rz(ff(name=f"ff_{i}")(latent))
 
-        return latent
+        return latent.astype(self.output_dtype)
 
 
 class MTREncoder(nn.Module):
@@ -115,6 +128,9 @@ class MTREncoder(nn.Module):
     attn_dropout: float = 0.0
     dk: int = 64
     k: int = 8
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, obs: jax.Array) -> jax.Array:
@@ -144,6 +160,9 @@ class MTREncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "sdc_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         other_traj_encoding = encoders.build_mlp_embedding(
             other_traj_features,
@@ -151,6 +170,9 @@ class MTREncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "other_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         rg_encoding = encoders.build_mlp_embedding(
             rg_features,
@@ -158,6 +180,9 @@ class MTREncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "rg_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         tl_encoding = encoders.build_mlp_embedding(
             tl_features,
@@ -165,6 +190,9 @@ class MTREncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "tl_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         gps_path_encoding = encoders.build_mlp_embedding(
             gps_path_features,
@@ -172,6 +200,9 @@ class MTREncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "gps_path_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
 
         # Max pooling - https://arxiv.org/pdf/2209.13508 - P4 for input representation
@@ -201,11 +232,26 @@ class MTREncoder(nn.Module):
         tl_valid_mask = jnp.max(tl_valid_mask, axis=-1)  # [B,N]
 
         # Positional Encoding
-        sdc_traj_encoding += jnp.expand_dims(self.param("sdc_traj_pe", init.normal(), (1, self.dk)), 0)
-        other_traj_encoding += jnp.expand_dims(self.param("other_traj_pe", init.normal(), (num_objects, self.dk)), 0)
-        rg_encoding += jnp.expand_dims(self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)), 0)
-        tl_encoding += jnp.expand_dims(self.param("tl_pe", init.normal(), (num_light, self.dk)), 0)
-        gps_path_encoding += jnp.expand_dims(self.param("gps_path_pe", init.normal(), (target_len, self.dk)), 0)
+        sdc_traj_encoding += jnp.expand_dims(
+            self.param("sdc_traj_pe", init.normal(), (1, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        other_traj_encoding += jnp.expand_dims(
+            self.param("other_traj_pe", init.normal(), (num_objects, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        rg_encoding += jnp.expand_dims(
+            self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        tl_encoding += jnp.expand_dims(
+            self.param("tl_pe", init.normal(), (num_light, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        gps_path_encoding += jnp.expand_dims(
+            self.param("gps_path_pe", init.normal(), (target_len, self.dk)).astype(self.compute_dtype),
+            0,
+        )
 
         # Mask for gps path target
         gps_path_valid_mask = jnp.ones(gps_path_encoding.shape[:-1]).astype(bool)
@@ -234,9 +280,12 @@ class MTREncoder(nn.Module):
             attn_dropout=self.attn_dropout,
             ff_dropout=self.ff_dropout,
             k=self.k,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
             name="mtr_attention",
         )(input, other_traj_encoding, mask_latent=input_mask, mask_x=other_traj_valid_mask)
 
         output = output.mean(axis=1)
 
-        return output
+        return output.astype(self.output_dtype)

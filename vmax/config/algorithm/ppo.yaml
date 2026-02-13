@@ -3,15 +3,15 @@ defaults:
   - _self_
 
 name: PPO
-unroll_length: 40
-batch_size: 128
+unroll_length: 32
+batch_size: 256
 num_minibatches: 4
-learning_rate: 3e-4
+learning_rate: 5e-5
 discount: 0.99
 gae_lambda: 0.95
 eps_clip: 0.2
 value_coef: 0.5
-entropy_coef: 0.01
+entropy_coef: 0.005 
 normalize_advantages: true
 grad_updates_per_step: 4
 
@@ -26,4 +26,4 @@ network:
     activation: tanh  # gelu, relu, selu
     final_activation: none  # tanh, relu
     num_networks: 1
-    shared_encoder: false
+    shared_encoder: true

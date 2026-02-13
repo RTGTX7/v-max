@@ -99,6 +99,16 @@ Datasets processed via ScenarioMax with SDC paths are available on HuggingFace:
     pip install -e .
     ```
 
+3. **(Recommended) Recreate the Exact Environment Used on a Reference Machine**
+
+    ```bash
+    ./setup_env.sh venv
+    source venv/bin/activate
+    ```
+
+    This installs from `requirements.lock.txt` (pinned versions) and then installs local `vmax` in editable mode.
+    Note: GPU driver/CUDA system packages are not captured by `pip` and must be installed separately on each machine.
+
 ### Quickstart
 
 Train any RL/IL algorithm and network encoder implemented in V-Max:

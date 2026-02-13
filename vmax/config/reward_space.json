@@ -1,0 +1,24 @@
+{
+  "reward_keys": [
+    "off_route",
+    "progression"
+  ],
+  "space": {
+    "reward.off_route": {"type": "float", "low": 0.2, "high": 3.0, "scale": "linear"},
+    "reward.progression": {"type": "float", "low": 0.2, "high": 3.0, "scale": "log"}
+  },
+  "search": {
+  "mode": "grid_refine",
+  "budgets": [50000000, 50000000, 50000000, 50000000],
+  "grid_points_by_round": [5, 2, 2, 1],
+  "shrink": 0.6,
+  "resume_from_map": true,
+  "resume_shrink_rounds": 1,
+
+  "refine_top_k": 3,
+  "refine_merge_radius": 0.35,
+  "refine_pool": 60,
+  "refine_diversity": true,
+  "refine_fill_after_merge": true
+  }
+}

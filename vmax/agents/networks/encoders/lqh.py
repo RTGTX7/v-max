@@ -40,6 +40,9 @@ class LQHAttention(nn.Module):
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
     use_self_attention: bool = False
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, xs, masks):
@@ -53,6 +56,7 @@ class LQHAttention(nn.Module):
             Updated latent tensor.
 
         """
+        xs = [x.astype(self.compute_dtype) for x in xs]
         bs, dim = xs[0].shape[0], xs[0].shape[-1]
         latents = self.param("latents", init.normal(), (self.num_latents, dim * self.ff_mult))
         latent = einops.repeat(latents, "n d -> b n d", b=bs)
@@ -62,8 +66,18 @@ class LQHAttention(nn.Module):
             heads=self.num_heads,
             head_features=self.head_features,
             dropout=self.attn_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
-        ff = partial(encoders.FeedForward, mult=self.ff_mult, dropout=self.ff_dropout)
+        ff = partial(
+            encoders.FeedForward,
+            mult=self.ff_mult,
+            dropout=self.ff_dropout,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
+        )
 
         # LQH - different weights for each cross and self attention
         for i, (x, mask) in enumerate(zip(xs, masks, strict=False)):
@@ -79,7 +93,7 @@ class LQHAttention(nn.Module):
                 latent += rz(attn(name=f"self_attn_{i}")(latent))
                 latent += rz(ff(name=f"ff_self_attn_{i}")(latent))
 
-        return latent
+        return latent.astype(self.output_dtype)
 
 
 class LQHEncoder(nn.Module):
@@ -113,6 +127,9 @@ class LQHEncoder(nn.Module):
     attn_dropout: float = 0.0
     ff_dropout: float = 0.0
     use_self_attention: bool = False
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, obs: jax.Array) -> jax.Array:
@@ -142,6 +159,9 @@ class LQHEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "sdc_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         other_traj_encoding = encoders.build_mlp_embedding(
             other_traj_features,
@@ -149,6 +169,9 @@ class LQHEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "other_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         rg_encoding = encoders.build_mlp_embedding(
             rg_features,
@@ -156,6 +179,9 @@ class LQHEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "rg_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         tl_encoding = encoders.build_mlp_embedding(
             tl_features,
@@ -163,6 +189,9 @@ class LQHEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "tl_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         gps_path_encoding = encoders.build_mlp_embedding(
             gps_path_features,
@@ -170,17 +199,32 @@ class LQHEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "gps_path_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
 
         # Positional Encoding
-        sdc_traj_encoding += jnp.expand_dims(self.param("sdc_traj_pe", init.normal(), (1, timestep_agents, self.dk)), 0)
-        other_traj_encoding += jnp.expand_dims(
-            self.param("other_traj_pe", init.normal(), (num_objects, timestep_agents, self.dk)),
+        sdc_traj_encoding += jnp.expand_dims(
+            self.param("sdc_traj_pe", init.normal(), (1, timestep_agents, self.dk)).astype(self.compute_dtype),
             0,
         )
-        rg_encoding += jnp.expand_dims(self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)), 0)
-        tl_encoding += jnp.expand_dims(self.param("tj_pe", init.normal(), (num_light, timestep_tl, self.dk)), 0)
-        gps_path_encoding += jnp.expand_dims(self.param("gps_path_pe", init.normal(), (target_len, self.dk)), 0)
+        other_traj_encoding += jnp.expand_dims(
+            self.param("other_traj_pe", init.normal(), (num_objects, timestep_agents, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        rg_encoding += jnp.expand_dims(
+            self.param("rg_pe", init.normal(), (num_roadgraph, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        tl_encoding += jnp.expand_dims(
+            self.param("tj_pe", init.normal(), (num_light, timestep_tl, self.dk)).astype(self.compute_dtype),
+            0,
+        )
+        gps_path_encoding += jnp.expand_dims(
+            self.param("gps_path_pe", init.normal(), (target_len, self.dk)).astype(self.compute_dtype),
+            0,
+        )
 
         # Flatten by NumAgent NumObsTS , Feature_dim
         sdc_traj_encoding = einops.rearrange(sdc_traj_encoding, "b n t d -> b (n t) d")
@@ -203,9 +247,12 @@ class LQHEncoder(nn.Module):
             attn_dropout=self.attn_dropout,
             ff_dropout=self.ff_dropout,
             use_self_attention=self.use_self_attention,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
             name="lq_attention",
         )(inputs, masks)
 
         output = output.mean(axis=1)
 
-        return output
+        return output.astype(self.output_dtype)

@@ -32,6 +32,9 @@ class MLPEncoder(nn.Module):
     dk: int = 64
     concat_layer_sizes: tuple[int] = (256, 256)
     concat_activation: datatypes.ActivationFn = nn.relu
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, obs: jax.Array) -> jax.Array:
@@ -69,6 +72,9 @@ class MLPEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "sdc_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         other_traj_encoding = encoders.build_mlp_embedding(
             other_traj_features,
@@ -76,6 +82,9 @@ class MLPEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "other_traj_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         rg_encoding = encoders.build_mlp_embedding(
             rg_features,
@@ -83,6 +92,9 @@ class MLPEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "rg_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         tl_encoding = encoders.build_mlp_embedding(
             tl_features,
@@ -90,6 +102,9 @@ class MLPEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "tl_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
         gps_path_encoding = encoders.build_mlp_embedding(
             gps_path_features,
@@ -97,6 +112,9 @@ class MLPEncoder(nn.Module):
             self.embedding_layer_sizes,
             self.embedding_activation,
             "gps_path_enc",
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.compute_dtype,
         )
 
         # Concatenate
@@ -106,6 +124,12 @@ class MLPEncoder(nn.Module):
         )
 
         # Apply mlp
-        output = decoders.MLP(layer_sizes=self.concat_layer_sizes, activation=self.concat_activation)(input)
+        output = decoders.MLP(
+            layer_sizes=self.concat_layer_sizes,
+            activation=self.concat_activation,
+            param_dtype=self.param_dtype,
+            compute_dtype=self.compute_dtype,
+            output_dtype=self.output_dtype,
+        )(input)
 
-        return output
+        return output.astype(self.output_dtype)

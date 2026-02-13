@@ -14,6 +14,16 @@ from waymax import metrics as waymax_metrics
 from vmax.simulator import constants, metrics, wrappers
 
 
+def _register_vmax_metrics() -> None:
+    """Register V-Max metrics safely when called multiple times in one process."""
+    for key in metrics._VMAX_METRICS_REGISTRY:
+        try:
+            waymax_metrics.register_metric(key, metrics.get_metrics(key))
+        except ValueError as exc:
+            if "already been registered" not in str(exc):
+                raise
+
+
 def make_data_generator(
     path: str,
     max_num_objects: int = 128,
@@ -86,9 +96,7 @@ def make_env(
 
     init_steps = 1 if noisy_init else 11
 
-    # Register metrics
-    for key in metrics._VMAX_METRICS_REGISTRY:
-        waymax_metrics.register_metric(key, metrics.get_metrics(key))
+    _register_vmax_metrics()
 
     env_config = _config.EnvironmentConfig(
         max_num_objects=max_num_objects,
@@ -227,9 +235,7 @@ def make_multi_agent_env_for_evaluation(
     # Add SDC V-Max metrics
     metrics_to_run += metrics._VMAX_METRICS_REGISTRY.keys()
 
-    # Register metrics
-    for key in metrics._VMAX_METRICS_REGISTRY:
-        waymax_metrics.register_metric(key, metrics.get_metrics(key))
+    _register_vmax_metrics()
 
     init_steps = 1 if noisy_init else 11
 
@@ -346,7 +352,8 @@ def _add_reward_wrapper(
     """
     if type == "linear":
         env = wrappers.RewardLinearWrapper(env, reward_config)
-    elif type == "custom":
-        env = wrappers.RewardCustomWrapper(env)
+
+    elif type == "multiplicative":
+        env = wrappers.RewardCustomWrapper(env, reward_config)
 
     return env

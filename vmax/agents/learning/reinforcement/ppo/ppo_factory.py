@@ -79,6 +79,7 @@ def initialize(
         policy=network.policy_network.init(key_policy),
         value=network.value_network.init(key_value),
     )
+
     optimizer_state = network.optimizer.init(init_params)
 
     training_state = PPOTrainingState(
@@ -184,6 +185,11 @@ def make_sgd_step(
     value_coef: float,
     entropy_coef: float,
     normalize_advantages: bool,
+    mixed_precision: bool = False,
+    mp_dtype: str = "bf16",
+    encoder_compute_dtype: str | None = None,
+    cast_encoder_inputs: bool | None = None,
+    pmap_axis_name: str | None = "batch",
 ) -> datatypes.LearningFunction:
     """Create the SGD step function for PPO.
 
@@ -201,6 +207,25 @@ def make_sgd_step(
         A function that executes an SGD step.
 
     """
+    if mixed_precision and mp_dtype not in ("bf16", "bfloat16"):
+        raise ValueError(f"Unsupported training.mp_dtype '{mp_dtype}'. Only 'bf16' is supported.")
+
+    if encoder_compute_dtype is None:
+        encoder_compute_dtype = "bf16" if mixed_precision else "float32"
+    encoder_compute_dtype = str(encoder_compute_dtype).lower()
+    if encoder_compute_dtype in ("bf16", "bfloat16"):
+        encoder_compute_dtype = "bf16"
+    elif encoder_compute_dtype in ("fp32", "float32"):
+        encoder_compute_dtype = "float32"
+    else:
+        raise ValueError(
+            f"Unsupported encoder_compute_dtype '{encoder_compute_dtype}'. "
+            "Supported values are: float32, fp32, bfloat16, bf16.",
+        )
+
+    if cast_encoder_inputs is None:
+        cast_encoder_inputs = encoder_compute_dtype == "bf16"
+
     ppo_loss = _make_loss_fn(
         ppo_network,
         gae_lambda,
@@ -209,8 +234,15 @@ def make_sgd_step(
         value_coef,
         entropy_coef,
         normalize_advantages,
+        encoder_compute_dtype,
+        bool(cast_encoder_inputs),
     )
-    ppo_update = networks.gradient_update_fn(ppo_loss, ppo_network.optimizer, pmap_axis_name="batch", has_aux=True)
+    ppo_update = networks.gradient_update_fn(
+        ppo_loss,
+        ppo_network.optimizer,
+        pmap_axis_name=pmap_axis_name,
+        has_aux=True,
+    )
 
     def sgd_step(
         carry: tuple[PPOTrainingState, jax.Array],
@@ -262,6 +294,31 @@ def make_sgd_step(
     return sgd_step
 
 
+def maybe_cast_inputs(
+    data: datatypes.RLTransition,
+    encoder_compute_dtype: str,
+    cast_encoder_inputs: bool,
+) -> datatypes.RLTransition:
+    """Cast encoder inputs to the configured encoder dtype."""
+    if not cast_encoder_inputs:
+        return data
+
+    if encoder_compute_dtype == "bf16":
+        obs_dtype = jnp.bfloat16
+    elif encoder_compute_dtype == "float32":
+        obs_dtype = jnp.float32
+    else:
+        raise ValueError(
+            f"Unsupported encoder_compute_dtype '{encoder_compute_dtype}'. "
+            "Supported values are: float32, bf16.",
+        )
+
+    return data._replace(
+        observation=data.observation.astype(obs_dtype),
+        next_observation=data.next_observation.astype(obs_dtype),
+    )
+
+
 def _make_loss_fn(
     ppo_network: PPONetworks,
     gae_lambda: float,
@@ -270,6 +327,8 @@ def _make_loss_fn(
     value_coef: float,
     entropy_coef: float,
     normalize_advantages: bool,
+    encoder_compute_dtype: str,
+    cast_encoder_inputs: bool,
 ) -> tuple[jax.Array, datatypes.Metrics]:
     """Define PPO loss and associated metrics.
 
@@ -295,30 +354,36 @@ def _make_loss_fn(
         data: datatypes.RLTransition,
         key: jax.Array,
     ) -> tuple[jax.Array, datatypes.Metrics]:
+        data = maybe_cast_inputs(
+            data,
+            encoder_compute_dtype=encoder_compute_dtype,
+            cast_encoder_inputs=cast_encoder_inputs,
+        )
+
         # (T, B, ...) -> (B, T, ...)
         data = jax.tree_util.tree_map(lambda x: jnp.swapaxes(x, 0, 1), data)
 
         # Flatten the batch dimension
         obs = jnp.reshape(data.observation, (-1,) + data.observation.shape[2:])
 
-        policy_logits = policy_apply(params.policy, obs)
-        baseline = value_apply(params.value, obs).squeeze(-1)
+        policy_logits = policy_apply(params.policy, obs).astype(jnp.float32)
+        baseline = value_apply(params.value, obs).squeeze(-1).astype(jnp.float32)
 
         # Unflatten the batch dimension
         policy_logits = jnp.reshape(policy_logits, (data.observation.shape[0], -1) + policy_logits.shape[1:])
         baseline = jnp.reshape(baseline, (data.observation.shape[0], -1))
 
-        bootstrap_value = value_apply(params.value, data.next_observation[-1]).squeeze(-1)
+        bootstrap_value = value_apply(params.value, data.next_observation[-1]).squeeze(-1).astype(jnp.float32)
 
-        rewards = data.reward
-        truncation = data.extras["state_extras"]["truncation"]
-        termination = (1 - data.flag) * (1 - truncation)
+        rewards = data.reward.astype(jnp.float32)
+        truncation = data.extras["state_extras"]["truncation"].astype(jnp.float32)
+        termination = ((1 - data.flag) * (1 - truncation)).astype(jnp.float32)
 
         target_log_probs = parametric_action_distribution.log_prob(
             policy_logits,
             data.extras["policy_extras"]["raw_action"],
-        )
-        log_probs = data.extras["policy_extras"]["log_prob"]
+        ).astype(jnp.float32)
+        log_probs = data.extras["policy_extras"]["log_prob"].astype(jnp.float32)
 
         vs, advantages = _compute_gae(
             truncation=truncation,
@@ -331,23 +396,24 @@ def _make_loss_fn(
         )
 
         if normalize_advantages:
-            advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+            advantages = advantages.astype(jnp.float32)
+            advantages = (advantages - jnp.mean(advantages)) / (jnp.std(advantages) + 1e-8)
 
-        rho_s = jnp.exp(target_log_probs - log_probs)
+        rho_s = jnp.exp((target_log_probs - log_probs).astype(jnp.float32))
         surrogate_loss1 = advantages * rho_s
         surrogate_loss2 = advantages * jnp.clip(rho_s, 1 - eps_clip, 1 + eps_clip)
 
-        policy_loss = -jnp.mean(jnp.minimum(surrogate_loss1, surrogate_loss2))
+        policy_loss = -jnp.mean(jnp.minimum(surrogate_loss1, surrogate_loss2), dtype=jnp.float32)
 
         # Value function loss
-        v_error = vs - baseline
-        value_loss = jnp.mean(v_error * v_error) * value_coef
+        v_error = (vs - baseline).astype(jnp.float32)
+        value_loss = jnp.mean(v_error * v_error, dtype=jnp.float32) * value_coef
 
         # Entropy reward
-        entropy = jnp.mean(parametric_action_distribution.entropy(policy_logits, key))
+        entropy = jnp.mean(parametric_action_distribution.entropy(policy_logits, key), dtype=jnp.float32)
         entropy_loss = entropy_coef * -entropy
 
-        total_loss = policy_loss + value_loss + entropy_loss
+        total_loss = (policy_loss + value_loss + entropy_loss).astype(jnp.float32)
 
         return total_loss, {
             "policy_loss": policy_loss,
@@ -383,6 +449,12 @@ def _compute_gae(
         A tuple with the target values and computed advantages.
 
     """
+    truncation = truncation.astype(jnp.float32)
+    termination = termination.astype(jnp.float32)
+    rewards = rewards.astype(jnp.float32)
+    values = values.astype(jnp.float32)
+    bootstrap_value = bootstrap_value.astype(jnp.float32)
+
     truncation_mask = 1 - truncation
 
     # Append bootstrapped value to get [v1, ..., v_t+1]

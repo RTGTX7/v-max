@@ -155,7 +155,7 @@ def _compute_overspeed_limit_reward(state: datatypes.SimulatorState, threshold: 
     """Compute a reward based on speed-limit adherence.
 
     Returns True if the SDC's speed exceeds the road's speed limit by more than
-    2.23 m/s (approximately 5 mph).
+    2.23 m/s (approximately 5 mph). m/s * 3.6 = km/h
 
     Args:
         state: Current simulator state.
@@ -322,3 +322,151 @@ def _compute_comfort_reward(state: datatypes.SimulatorState) -> float:
     comfort_metric_reward_2 = metrics.ComfortMetric().compute_reward(state).value
 
     return comfort_metric_reward_2
+
+def _compute_safe_bubble_reward(
+    state: datatypes.SimulatorState,
+    # ---- bubble 尺度（TTC-boundary）----
+    ttc_front: float = 1.2,         # 建议从 1.2 开始（你之前 1.5 更保守）
+    ttc_rear: float = 1.0,
+    d_static: float = 1.5,
+    d_static_rear: float = 1.0,
+    clip_front: float = 45.0,
+    clip_rear: float = 25.0,
+    rear_frac: float = 0.6,
+
+    # ---- bubble 形状（superellipse）----
+    anisotropy: float = 1.0,        # 侧向缩放
+    p_base: float = 2.0,
+    delta_p: float = 0.8,
+
+    # ---- 距离惩罚（你要的：0.1m 最强，2m 以内指数衰减到 1）----
+    threshold_m: float = 2.0,       # 2m 内开始惩罚
+    dist_min: float = 0.1,          # 0.1m 以内视为最严重
+    min_score: float = 0.2,         # 最小 score（用于乘法项）
+    # 是否只在 bubble 内计算（推荐 True）
+    gate_by_bubble: bool = True,
+    # bubble gating 放宽一点（避免边界数值抖动）
+    bubble_margin: float = 0.10,
+    **_,
+) -> jax.Array:
+    """
+    返回 score ∈ [min_score, 1]：
+      - 若没有对象触发风险：score=1
+      - 若存在对象 clearance < threshold_m：score 按指数衰减，clearance<=dist_min -> min_score
+
+    说明：
+    - clearance 是“近似几何间隙”，不是 TTC。
+    - bubble 用于决定“哪些对象值得考虑”（可关/可开）。
+    """
+
+    # ========== 取 SDC 索引 ==========
+    sdc_idx = operations.get_index(state.object_metadata.is_sdc)
+
+    # ========== 取当前时刻轨迹（Waymax traj） ==========
+    traj = state.current_sim_trajectory
+
+    # 位置/朝向/速度
+    ego_xy = jnp.stack([traj.x[sdc_idx], traj.y[sdc_idx]], axis=-1).squeeze()          # (2,)
+    ego_yaw = traj.yaw[sdc_idx].squeeze()
+    ego_speed = traj.speed[sdc_idx].squeeze()                                          # m/s
+
+    # ego 尺寸（用于近似几何间隙）
+    ego_length = traj.length[sdc_idx].squeeze()
+    ego_width  = traj.width[sdc_idx].squeeze()
+    ego_rad = 0.5 * jnp.sqrt(ego_length**2 + ego_width**2)
+
+    # ========== 其他对象 mask ==========
+    valid = traj.valid.squeeze()                     # (N,)
+    is_sdc = state.object_metadata.is_sdc.squeeze()  # (N,)
+    others = valid & (~is_sdc)
+
+    # 若没有其他对象：返回 1
+    def _no_obj():
+        return jnp.array(1.0, dtype=jnp.float32)
+
+    def _has_obj():
+        # ========== 取其他对象位置/尺寸 ==========
+        obj_xy = jnp.stack([traj.x, traj.y], axis=-1)          # (N,2)
+        rel = obj_xy - ego_xy                                  # (N,2)
+
+        # 旋转到 ego 坐标系（x: 右，y: 前）
+        c = jnp.cos(-ego_yaw)
+        s = jnp.sin(-ego_yaw)
+        R = jnp.array([[c, -s], [s, c]], dtype=jnp.float32)
+        rel_ego = (rel @ R.T).astype(jnp.float32)              # (N,2)
+        x = rel_ego[:, 0]
+        y = rel_ego[:, 1]
+
+        # 对象半径近似
+        obj_rad = 0.5 * jnp.sqrt(traj.length.squeeze()**2 + traj.width.squeeze()**2)
+
+        # ========== 计算 bubble 参数（TTC-boundary + 侧向半径） ==========
+        # 侧向半径：用车宽+margin（你也可改成你那套 w_side 逻辑）
+        lane_width = jnp.array(3.6, dtype=jnp.float32)
+        base_margin = jnp.array(0.2, dtype=jnp.float32)
+        car_half = ego_width * 0.5
+        side_radius = jnp.clip(car_half + base_margin, car_half + 0.15, lane_width)
+        a_lat = side_radius / jnp.maximum(anisotropy, 1e-3)
+
+        # 前后 longitudinal base（TTC-boundary）
+        front_base = d_static + ego_speed * ttc_front
+        front_base = jnp.clip(front_base, d_static, clip_front)
+
+        rear_base = d_static_rear + ego_speed * ttc_rear
+        rear_base = jnp.minimum(rear_base, rear_frac * front_base)
+        rear_base = jnp.clip(rear_base, d_static_rear, clip_rear)
+
+        # superellipse 形状参数
+        p_front = jnp.clip(p_base + delta_p, 1.0, 5.0)
+        p_back  = jnp.clip(p_base - delta_p, 1.0, 5.0)
+
+        # ========== bubble gating：计算是否在 bubble 内/附近 ==========
+        # s = (|x|/a)^p + (|y|/b)^p  （前后 b 不同；用 y 的符号选）
+        ax = jnp.maximum(a_lat, 1e-3)
+        absx = jnp.abs(x)
+
+        # front/back 分开
+        y_pos = jnp.maximum(y, 0.0)
+        y_neg = jnp.maximum(-y, 0.0)
+
+        s_front = (absx / ax) ** p_front + (y_pos / jnp.maximum(front_base, 1e-3)) ** p_front
+        s_back  = (absx / ax) ** p_back  + (y_neg / jnp.maximum(rear_base,  1e-3)) ** p_back
+
+        # 只对“前方用 front，后方用 back”的那部分生效
+        s_val = jnp.where(y >= 0.0, s_front, s_back)
+
+        # margin：允许略微超出 bubble 也纳入（减少边缘抖动）
+        bubble_ok = s_val <= (1.0 + bubble_margin)
+
+        # ========== 计算 clearance（近似几何间隙） ==========
+        # center distance - radii
+        center_dist = jnp.linalg.norm(rel, axis=-1)  # (N,) 直接世界系距离也行（不依赖朝向）
+        clearance = center_dist - (ego_rad + obj_rad)
+
+        # 只考虑 others
+        clearance = jnp.where(others, clearance, jnp.inf)
+        if gate_by_bubble:
+            clearance = jnp.where(bubble_ok & others, clearance, jnp.inf)
+
+        # 取最危险的对象
+        dmin = jnp.min(clearance)  # 可能是 inf
+
+        # ========== 从 clearance -> score（指数衰减，2m 内开始惩罚） ==========
+        # 规则：
+        #   d >= threshold -> 1
+        #   d <= dist_min  -> min_score
+        #   中间：score = exp(-λ*(threshold - d))，并保证到 dist_min 时为 min_score
+        lam = -jnp.log(jnp.maximum(min_score, 1e-6)) / jnp.maximum(threshold_m - dist_min, 1e-3)
+
+        # delta = threshold - d
+        delta = threshold_m - dmin
+        score_mid = jnp.exp(-lam * delta)
+
+        score = jnp.where(dmin >= threshold_m, 1.0, score_mid)
+        score = jnp.where(dmin <= dist_min, min_score, score)
+        score = jnp.clip(score, min_score, 1.0)
+        return score.astype(jnp.float32)
+
+    # 如果没有其他对象（others 全 False），直接 1
+    has_any = jnp.any(others)
+    return jax.lax.cond(has_any, _has_obj, _no_obj)

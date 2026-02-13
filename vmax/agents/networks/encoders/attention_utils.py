@@ -20,6 +20,9 @@ class FeedForward(nn.Module):
 
     mult: int = 4
     dropout: float = 0.0
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x: jax.Array, deterministic: bool = False) -> jax.Array:
@@ -35,12 +38,13 @@ class FeedForward(nn.Module):
         """
         features = x.shape[-1]
 
-        x = nn.Dense(features * self.mult)(x)
-        x = nn.gelu(x)
+        x = x.astype(self.compute_dtype)
+        x = nn.Dense(features * self.mult, param_dtype=self.param_dtype, dtype=self.compute_dtype)(x)
+        x = nn.gelu(x.astype(jnp.float32)).astype(self.compute_dtype)
         x = nn.Dropout(self.dropout)(x, deterministic=deterministic)
-        x = nn.Dense(features)(x)
+        x = nn.Dense(features, param_dtype=self.param_dtype, dtype=self.compute_dtype)(x)
 
-        return x
+        return x.astype(self.output_dtype)
 
 
 def default(val, d):
@@ -106,6 +110,9 @@ class AttentionLayer(nn.Module):
     heads: int = 8
     head_features: int = 64
     dropout: float = 0.0
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x: jax.Array, context=None, mask_k=None, mask_q=None, deterministic: bool = False) -> jax.Array:
@@ -123,15 +130,18 @@ class AttentionLayer(nn.Module):
 
         """
         # mask is on context(k)
+        x = x.astype(self.compute_dtype)
+        if context is not None:
+            context = context.astype(self.compute_dtype)
         h = self.heads
         dim = self.head_features * h
 
-        q = nn.Dense(dim, use_bias=False)(x)
-        k = nn.Dense(dim, use_bias=False)(default(context, x))
-        v = nn.Dense(dim, use_bias=False)(default(context, x))
+        q = nn.Dense(dim, use_bias=False, param_dtype=self.param_dtype, dtype=self.compute_dtype)(x)
+        k = nn.Dense(dim, use_bias=False, param_dtype=self.param_dtype, dtype=self.compute_dtype)(default(context, x))
+        v = nn.Dense(dim, use_bias=False, param_dtype=self.param_dtype, dtype=self.compute_dtype)(default(context, x))
 
         q, k, v = map(lambda arr: einops.rearrange(arr, "b n (h d) -> b n h d", h=h), (q, k, v))
-        sim = jnp.einsum("b i h d, b j h d -> b i j h", q, k) * self.head_features**-0.5
+        sim = jnp.einsum("b i h d, b j h d -> b i j h", q, k).astype(jnp.float32) * self.head_features**-0.5
 
         if mask_k is not None:
             big_neg = jnp.finfo(jnp.float32).min
@@ -140,14 +150,14 @@ class AttentionLayer(nn.Module):
             big_neg = jnp.finfo(jnp.float32).min
             sim = jnp.where(mask_q[:, :, None, None], sim, big_neg)
 
-        attn = nn.softmax(sim, axis=-2)  # -2 we kept h dim in matrix (could we merge h with b ?)
+        attn = nn.softmax(sim, axis=-2).astype(self.compute_dtype)  # -2 we kept h dim in matrix
         out = jnp.einsum("b i j h, b j h d -> b i h d", attn, v)
         out = einops.rearrange(out, "b n h d -> b n (h d)", h=h)
 
-        out = nn.Dense(x.shape[-1])(out)
+        out = nn.Dense(x.shape[-1], param_dtype=self.param_dtype, dtype=self.compute_dtype)(out)
         out = nn.Dropout(self.dropout)(out, deterministic=deterministic)
 
-        return out
+        return out.astype(self.output_dtype)
 
 
 class LocalAttentionLayer(nn.Module):
@@ -163,6 +173,9 @@ class LocalAttentionLayer(nn.Module):
     heads: int = 8
     head_features: int = 64
     dropout: float = 0.0
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(
@@ -191,12 +204,15 @@ class LocalAttentionLayer(nn.Module):
         # masqk_q: [B,Nq]
         # masqk_k: [B,Nk]
         # index pairs: [B, Nq, K]
+        x = x.astype(self.compute_dtype)
+        if context is not None:
+            context = context.astype(self.compute_dtype)
         h = self.heads
         dim = self.head_features * h
 
-        q = nn.Dense(dim)(x)
-        k = nn.Dense(dim, use_bias=False)(default(context, x))
-        v = nn.Dense(dim, use_bias=False)(default(context, x))
+        q = nn.Dense(dim, param_dtype=self.param_dtype, dtype=self.compute_dtype)(x)
+        k = nn.Dense(dim, use_bias=False, param_dtype=self.param_dtype, dtype=self.compute_dtype)(default(context, x))
+        v = nn.Dense(dim, use_bias=False, param_dtype=self.param_dtype, dtype=self.compute_dtype)(default(context, x))
 
         k = jnp.take_along_axis(k[:, :, None, :], index_pairs[:, :, :, None], axis=1)  # [B,Nq,K,D]
         v = jnp.take_along_axis(v[:, :, None, :], index_pairs[:, :, :, None], axis=1)  # [B,Nq,K,D]
@@ -206,7 +222,7 @@ class LocalAttentionLayer(nn.Module):
         v = einops.rearrange(v, "b n k (h d) -> b n k h d", h=h)
         q = einops.rearrange(q, "b n (h d) -> b n h d", h=h)
 
-        sim = jnp.einsum("b i h d, b i k h d -> b i k h", q, k) * self.head_features**-0.5  # [B,Nq,k,H]
+        sim = jnp.einsum("b i h d, b i k h d -> b i k h", q, k).astype(jnp.float32) * self.head_features**-0.5
 
         if mask_q is not None:
             big_neg = jnp.finfo(jnp.float32).min
@@ -216,11 +232,11 @@ class LocalAttentionLayer(nn.Module):
             mask = jnp.take_along_axis(mask_k[:, :, None], index_pairs[:, :, :], axis=1)  # [B,Nq,K]
             sim = jnp.where(mask[:, :, :, None], sim, big_neg)
 
-        attn = nn.softmax(sim, axis=-2)  # [B,Nq,k,H]
+        attn = nn.softmax(sim, axis=-2).astype(self.compute_dtype)  # [B,Nq,k,H]
         out = jnp.einsum("b i k h, b i k h d -> b i h d", attn, v)
         out = einops.rearrange(out, "b n h d -> b n (h d)", h=h)  # [B,Nq,d]
 
-        out = nn.Dense(x.shape[-1])(out)
+        out = nn.Dense(x.shape[-1], param_dtype=self.param_dtype, dtype=self.compute_dtype)(out)
         out = nn.Dropout(self.dropout)(out, deterministic=deterministic)
 
-        return out
+        return out.astype(self.output_dtype)

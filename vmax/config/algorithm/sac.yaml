@@ -4,14 +4,14 @@ defaults:
 
 name: SAC
 unroll_length: 1
-learning_rate: 3e-4
+learning_rate: 1e-4
 discount: 0.99
 tau: 0.005
 alpha: 0.2
 batch_size: 64
 grad_updates_per_step: 4
-buffer_size: 100_000
-learning_start: 100
+buffer_size: 1_000_000
+learning_start: 50000
 
 network:
   policy:
@@ -22,6 +22,6 @@ network:
   value:
     layer_sizes: [256, 256]
     activation: relu  # gelu, relu, selu
-    final_activation: relu  # tanh, relu
+    final_activation: none  # tanh, relu
     num_networks: 2
     shared_encoder: false

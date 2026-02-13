@@ -6,9 +6,12 @@
 import os
 import sys
 from functools import partial
+import inspect
+import logging
 
 import hydra
 from omegaconf import DictConfig, OmegaConf
+
 from waymax import dynamics
 
 from vmax import PATH_TO_APP, simulator
@@ -17,6 +20,8 @@ from vmax.scripts.training import train_utils
 
 
 OmegaConf.register_new_resolver("output_dir", train_utils.resolve_output_dir)
+
+LOG = logging.getLogger(__name__)
 
 
 @hydra.main(version_base=None, config_name="base_config", config_path=PATH_TO_APP + "/config")
@@ -81,6 +86,11 @@ def run(cfg: DictConfig) -> None:
 
     ## TRAINING
     train_fn = learning.get_train_fn(config["algorithm"]["name"])
+    resume_kwargs = {}
+    if "resume" in inspect.signature(train_fn).parameters:
+        resume_kwargs["resume"] = config.get("resume", {})
+    elif config.get("resume", {}).get("enabled"):
+        LOG.warning("resume.enabled is set but the trainer does not accept a resume argument.")
 
     train_fn(
         env=env,
@@ -90,6 +100,7 @@ def run(cfg: DictConfig) -> None:
         progress_fn=progress,
         checkpoint_logdir=model_path,
         disable_tqdm=not sys.stdout.isatty(),
+        **resume_kwargs,
     )
 
 

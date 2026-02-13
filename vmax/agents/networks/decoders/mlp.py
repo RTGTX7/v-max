@@ -6,6 +6,7 @@
 from collections.abc import Sequence
 
 import jax
+import jax.numpy as jnp
 from flax import linen as nn
 
 from vmax.agents import datatypes
@@ -18,6 +19,9 @@ class MLP(nn.Module):
     activation: datatypes.ActivationFn = nn.relu
     dropout_rate: float | None = None
     kernel_init: datatypes.Initializer = nn.initializers.lecun_uniform()
+    param_dtype: jnp.dtype = jnp.float32
+    compute_dtype: jnp.dtype = jnp.float32
+    output_dtype: jnp.dtype = jnp.float32
 
     @nn.compact
     def __call__(self, x: jax.Array, training: bool = False) -> jax.Array:
@@ -31,12 +35,19 @@ class MLP(nn.Module):
             The output tensor after processing through the MLP.
 
         """
+        x = x.astype(self.compute_dtype)
         for i, size in enumerate(self.layer_sizes):
-            x = nn.Dense(size, kernel_init=self.kernel_init, name=f"hidden_{i}")(x)
+            x = nn.Dense(
+                size,
+                kernel_init=self.kernel_init,
+                param_dtype=self.param_dtype,
+                dtype=self.compute_dtype,
+                name=f"hidden_{i}",
+            )(x)
 
             if i != len(self.layer_sizes) - 1:
                 x = self.activation(x)
             if self.dropout_rate is not None:
                 x = nn.Dropout(rate=self.dropout_rate)(x, deterministic=not training)
 
-        return x
+        return x.astype(self.output_dtype)

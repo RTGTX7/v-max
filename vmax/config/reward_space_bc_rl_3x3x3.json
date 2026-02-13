@@ -1,0 +1,25 @@
+{
+  "reward_keys": [
+    "route_safe",
+    "termination_switch",
+    "forward_quality"
+  ],
+  "space": {
+    "reward.route_safe": {
+      "type": "float",
+      "values": [0.2, 1.6, 8.0]
+    },
+    "reward.termination_switch": {
+      "type": "float",
+      "values": [0.2, 1.6, 8.0]
+    },
+    "reward.forward_quality": {
+      "type": "float",
+      "scale": "log",
+      "values": [0.2, 1.2649, 8.0]
+    }
+  },
+  "search": {
+    "mode": "grid"
+  }
+}

@@ -12,10 +12,12 @@ defaults:
 debug_flag: false
 perf_flag: false
 cache_flag: false
+gpu_mem_fraction: 0.95
+xla_python_client_preallocate: true
 
 # Run config
-total_timesteps: 20_000_000
-num_envs: 16
+total_timesteps: 200_000_000 #200_000_000
+num_envs: 64 #16 18 64
 num_episode_per_epoch: 4
 num_scenario_per_eval: 256
 scenario_length: 80
@@ -26,21 +28,56 @@ seed: 0
 name_run: null
 name_exp: null
 
+# Training precision config
+# Precision is split into two paths:
+# - encoder path: observation embedding/attention stack
+# - head path: policy/value MLPs and PPO computations
+# Current setup keeps PPO math stable in FP32 while saving memory in encoder BF16.
+training:
+  mixed_precision: true  # Legacy switch. Used only as fallback when new dtype keys are not set.
+  mp_dtype: bf16         # Legacy dtype for old configs/scripts (kept for backward compatibility).
+  compute_dtype: fp32    # Head compute dtype (policy/value forward + downstream PPO logits input).
+  encoder_compute_dtype: bf16  # Encoder forward dtype.
+  cast_encoder_inputs: true    # Cast observation/next_observation to encoder dtype before network forward.
+
+# Resume / retrain config
+resume:
+  enabled: false
+  ckpt_path: ""
+  mode: full  # full | weights_only | weights_reset_opt | weights_reset_opt_and_buffer
+  strict: true
+  load_replay_buffer: true
+  policy_init_std: 0.05  # Used when adapting deterministic policy heads to gaussian PPO heads.
+
 # Env config
-path_dataset: ???
-path_dataset_eval: null
+
+path_dataset: "/media/rtgtx7/加速盘/data/training.tfrecord"
+path_dataset_eval: "/media/rtgtx7/加速盘/data/validation.tfrecord"
+
 waymo_dataset: false
-max_num_objects: 64
+max_num_objects: 32
 termination_keys: [offroad, overlap, run_red_light]
 
 # Reward config
-reward_type: linear
+reward_type: multiplicative
 reward_config:
-  overlap: -1.0
-  offroad: -1.0
-  red_light: -1.0
-  off_route: -0.6
-  progression: 0.2
+  route_safe: 0.5
+  termination_switch: 0.8
+  forward_quality: 1.2
+
+
+#reward_config:
+#  off_route: 1.5
+#  offroad: 2
+#  overspeed: 0.5
+#  overlap: 4
+#  red_light: 4
+#  lane_deviation: 1.5
+#  driving_direction: 4
+#  below_ttc: 1.5
+
+#  progression: 1.8
+#  comfort: 2
 
 # Observation config
 observation_type: vec
