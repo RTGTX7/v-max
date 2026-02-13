@@ -1,7 +1,18 @@
 # Build
 *.pyc
 *.egg-info
+__pycache__/
 
 # Local data
 mini_datasets/
+data/
+tmp/
+runs/
+benchmark/
+venv/
 
+# Local training/eval artifacts
+events.out.tfevents*
+*.tfrecord
+*.pkl
+*.ckpt
