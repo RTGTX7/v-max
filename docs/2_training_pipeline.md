@@ -1,107 +1,253 @@
-# Training Pipeline Documentation
+# Training Pipeline (V‑Max)
 
-This document provides an overview of the training pipeline in the V-Max project, with a focus on the Soft Actor-Critic (SAC) reinforcement learning algorithm as an example. The goal is to help new contributors understand how the training process works, the main components involved, and how data flows through the system.
-
-## Overview
-
-The training pipeline is designed to train reinforcement learning agents in a simulated environment. It is modular, supporting different algorithms and environments, and is built to scale across multiple devices using JAX.
-
-The main steps in the training pipeline are:
-
-1. **Configuration and Initialization**
-2. **Data Generation**
-3. **Replay Buffer Management**
-4. **Training Loop**
-5. **Evaluation and Logging**
-6. **Checkpointing**
-
-Below, we describe each step using the SAC algorithm as an example.
+This document explains how training is launched, how data flows through the system, how checkpoints/resume work, and how to run reward sweeps. It is written to match the current repo behavior.
 
 ---
 
-## 1. Configuration and Initialization
+## 1) How Training Is Launched
 
-- The training process is launched via a script (e.g., `scripts/training/train.py`) that loads configuration files using Hydra and OmegaConf.
-- The configuration specifies hyperparameters, environment settings, network architectures, and paths for saving outputs.
-- The environment and data generators are created based on the configuration.
-- The SAC networks (policy and value networks) and optimizers are initialized. The networks are distributed across available devices using JAX's `pmap`.
+**Entry point**
+- `vmax/scripts/training/train.py`
+- Uses Hydra + OmegaConf with `vmax/config/base_config.yaml`
 
-## 2. Data Generation
-
-- The simulator provides batches of scenarios (environments) for training and evaluation.
-- For each training iteration, a batch of scenarios is sampled and reset.
-- The agent interacts with the environment using its current policy to generate transitions (state, action, reward, next state, done).
-
-## 3. Replay Buffer Management
-
-- An off-policy replay buffer stores transitions collected from the environment.
-- The buffer is pre-filled with random actions before training starts to ensure diverse initial data.
-- During training, new transitions are inserted into the buffer, and batches are sampled for learning.
-
-## 4. Training Loop
-
-- The main training loop iterates over the total number of timesteps.
-- In each iteration:
-  - The agent generates an unroll (sequence) of transitions using its policy.
-  - These transitions are added to the replay buffer.
-  - A batch of transitions is sampled from the buffer.
-  - Multiple gradient updates are performed using the sampled data (SGD steps).
-  - The policy and value networks are updated.
-- The training loop is parallelized across devices for efficiency.
-
-## 5. Evaluation and Logging
-
-- At regular intervals, the agent is evaluated on a separate set of scenarios.
-- Evaluation uses a deterministic version of the policy.
-- Metrics such as episode reward, episode length, and custom environment metrics are logged.
-- Progress is reported via TensorBoard and console outputs.
-
-## 6. Checkpointing
-
-- Model parameters are periodically saved to disk for later analysis or resuming training.
-- The final model is saved at the end of training.
+**Flow**
+1. Load config
+2. Build env + data generator
+3. Build networks + trainer
+4. Run training loop
+5. Save checkpoints + logs
 
 ---
 
-## Key Components and Functions
+## 2) Config Layout (Hydra)
 
-- **`train.py`**: Entry point for training. Handles configuration, environment setup, and launching the training loop.
-- **`sac_trainer.py`**: Implements the SAC training loop, including data collection, replay buffer management, and evaluation.
-- **`sac_factory.py`**: Contains SAC-specific network and optimizer initialization, and loss functions.
-- **`pipeline/training.py`**: Provides generic training and evaluation loops, supporting both off-policy and on-policy algorithms.
-- **`pipeline/inference.py`**: Defines how the agent interacts with the environment (policy steps, random steps, etc.).
-- **Replay Buffer**: Stores and samples transitions for off-policy learning.
+**Base config**
+- `vmax/config/base_config.yaml`
+
+**Key sections**
+- `algorithm`: PPO / SAC / BC / etc.
+- `network`: encoder + policy/value MLPs
+- `reward_type` + `reward_config`
+- `total_timesteps`, `log_freq`, `save_freq`, `eval_freq`
+
+**Output directory**
+- Output directory is created by `train_utils.resolve_output_dir()`
+- Default: `runs/<ALG>_<OBS>_<ENCODER>_<timestamp>/`
 
 ---
 
-## Data Flow Diagram (SAC Example)
+## 3) Training Data Flow (SAC Example)
 
 ```
-[Simulator Scenarios] --(reset/init)--> [Environment]
-      |                                      |
-      v                                      v
-[Agent Policy] <---(observations)--- [Environment State]
-      |                                      |
-      v                                      v
-[Actions] --(step)--> [Environment] --(transitions)--> [Replay Buffer]
-      |                                      |
-      v                                      v
-[Sampled Batch] <--- [Replay Buffer] <---(insert)
-      |
-      v
-[SGD Updates] --(update)--> [Policy/Value Networks]
+[Simulator Scenarios] -> [Environment]
+      |                     |
+      v                     v
+ [Policy] <- observations --[State]
+      |                     |
+      v                     v
+  [Actions] -> [Env Step] -> [Replay Buffer]
+      |                     |
+      v                     v
+   [Sampled Batch] -> [SGD Updates] -> [Networks]
 ```
 
 ---
 
-## Tips for New Contributors
+## 4) Logging & Metrics
 
-- Start by reading `train.py` to see how the pipeline is launched.
-- Follow the flow: configuration → environment/data generation → training loop → evaluation.
-- Use the SAC implementation as a template for adding new algorithms.
-- Check the replay buffer and pipeline modules for data handling logic.
-- Use logging and TensorBoard to monitor training progress.
+**Training logs**
+- File: `<run_dir>/train.log` (Hydra job log)
+- Format: `- metric_name: value`
+
+**TensorBoard**
+- Logged by `train_utils.log_metrics()`
+- Keys:
+  - `metrics/*` for general metrics
+  - `rollout/*` for `ep_*`
+  - `evaluation/*` for eval
+
+**Evaluation outputs**
+- `vmax/scripts/evaluate/evaluate.py`
+- Outputs:
+  - `evaluation_episodes.csv`
+  - `evaluation_results.txt`
+  - `mp4/` (if rendered)
 
 ---
 
-For more details, refer to the code and docstrings in each module. If you have questions, ask a team member or consult the codebase for examples.
+## 5) Checkpoints & Resume
+
+**Checkpoint types**
+- Weights only: `model_*.pkl`, `model_final.pkl`
+- Full state: `checkpoint_*.pkl`, `checkpoint_final.pkl`
+
+**Resume modes**
+- `weights_only`: warm‑start, resets optimizer + counters
+- `full`: full recovery (weights + optimizer + counters + RNG + buffer for SAC)
+
+**When to use**
+- Use `weights_only` when:
+  - reward weights changed
+  - architecture changed
+  - algorithm changed (PPO → SAC)
+- Use `full` only if:
+  - same algorithm + same architecture
+
+**Examples**
+```
+# Start PPO
+python vmax/scripts/training/train.py algorithm=ppo total_timesteps=1000000
+
+# Resume full
+python vmax/scripts/training/train.py algorithm=ppo \
+  resume.enabled=true resume.ckpt_path=/path/to/checkpoint_1000000.pkl \
+  resume.mode=full
+
+# Resume weights only
+python vmax/scripts/training/train.py algorithm=ppo \
+  resume.enabled=true resume.ckpt_path=/path/to/model_final.pkl \
+  resume.mode=weights_only resume.strict=false
+```
+
+---
+
+## 6) Reward Sweep Manager (Stage‑2)
+
+Script:
+- `vmax/scripts/experiments/reward_search_manager.py`
+
+Purpose:
+- Runs reward sweeps under a fixed root run folder
+- Maintains persistent map DB under `<root_run_dir>/map_db/`
+- Skips duplicate trials automatically
+
+**Output layout**
+```
+<root_run_dir>/
+  stage2_sweeps/
+    sweep_<timestamp>/
+      manifest.yaml
+      branches/
+      results/
+  map_db/
+    trials_long.csv
+    points_agg.csv
+    best.yaml
+    index.json
+    view_map.ipynb
+```
+
+**Minimal JSON (range based)**
+```
+{
+  "reward_keys": ["off_route", "progression"],
+  "space": {
+    "reward.off_route": {"type": "float", "low": 0.5, "high": 3.0, "scale": "linear"},
+    "reward.progression": {"type": "float", "low": 0.3, "high": 2.0, "scale": "log"}
+  },
+  "search": {
+    "mode": "grid_refine",
+    "grid_points": 5,
+    "rounds": 3,
+    "shrink": 0.5,
+    "budgets": [20000000, 50000000, 100000000]
+  }
+}
+```
+
+**Run (coarse‑to‑fine grid)**
+```
+python vmax/scripts/experiments/reward_search_manager.py \
+  --root_run_dir /path/to/stage1_run \
+  --ckpt_path /path/to/stage1_run/model/model_final.pkl \
+  --param_space_json vmax/config/reward_space.json \
+  --mode grid_refine
+  --extra_overrides network/encoder=encoder
+```
+
+Notes:
+- `root_run_dir` and `ckpt_path` typically point to the same run folder.
+  Example: `root_run_dir=/path/to/stage1_run`, `ckpt_path=/path/to/stage1_run/model/model_final.pkl`.
+- `--param_space_json` should point to the JSON file you created (e.g. `vmax/config/reward_space.json`).
+
+**Run (simple grid)**
+```
+python vmax/scripts/experiments/reward_search_manager.py \
+  --root_run_dir /path/to/stage1_run \
+  --ckpt_path /path/to/stage1_run/model/model_final.pkl \
+  --param_space_json vmax/config/reward_space.json \
+  --mode grid \
+  --convergence_steps 100000000
+```
+
+---
+
+## 7) Tips
+
+- Keep fixed reward weights in `base_config.yaml`.
+- Only sweep the parameters listed in the JSON space.
+- Use `weights_only + strict=false` if you change encoder or algorithm.
+- Use `grid_refine` when you want auto coarse‑to‑fine search.
+
+---
+
+## 8) RF Bayesian Optimizer (SMAC‑lite)
+
+Scripts:
+- `vmax/scripts/experiments/rf_bo_suggester.py`
+- `vmax/scripts/experiments/rf_bo_trainer.py`
+
+Purpose:
+- Use a Random‑Forest surrogate + EI to propose new reward points.
+- Reduce grid search waste in 2D (`reward_config.off_route`, `reward_config.progression`).
+
+**Generate suggestions only**
+```
+python vmax/scripts/experiments/rf_bo_suggester.py \
+  --trials_csv /path/to/root_run_dir/map_db/trials_long.csv \
+  --out_csv /path/to/root_run_dir/map_db/suggestions.csv \
+  --map_png /path/to/root_run_dir/map_db/map_rfbo.png \
+  --batch_size 12 \
+  --candidates 5000 \
+  --xmin 0.2 --xmax 3.0 --ymin 0.2 --ymax 3.0 \
+  --log_y \
+  --xi 0.01 \
+  --explore_frac 0.3 \
+  --min_dist 0.05 \
+  --seed 0
+```
+
+Output:
+- `suggestions.csv` (next points: exploit/explore, EI, uncertainty)
+- `map_rfbo.png` (mean / uncertainty / EI maps + points)
+
+**Auto‑train loop (RF‑BO + train.py)**
+```
+python vmax/scripts/experiments/rf_bo_trainer.py \
+  --root_run_dir /path/to/stage1_run \
+  --ckpt_path /path/to/stage1_run/model/model_final.pkl \
+  --rounds 40 \
+  --batch_size 12 \
+  --total_timesteps 50000000 \
+  --xmin 0.2 --xmax 3.0 --ymin 0.2 --ymax 3.0 \
+  --log_y \
+  --xi 0.01 \
+  --explore_frac 0.3 \
+  --min_dist 0.05 \
+  --seed 0 \
+  --extra_overrides path_dataset=/path/to/training.tfrecord path_dataset_eval=/path/to/eval.tfrecord
+```
+
+Notes:
+- Auto‑trainer reads `train.log` for `vmax_aggregate_score` and `nuplan_aggregate_score`.
+- Grade default: `0.5*vmax + 0.5*nuplan` (override with `--grade_*` flags).
+- All runs are stored under:
+  `<root_run_dir>/stage2_sweeps/rfbo_round_###/cand_###/`
+
+Notebook:
+- `docs/notebooks/observation/rf_bo_viz.ipynb`
+  (loads trials, generates suggestions + map)
+
+---
+
+If anything here doesn’t match your workflow, tell me what you want changed and I’ll rewrite again.

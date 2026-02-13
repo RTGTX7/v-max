@@ -39,6 +39,28 @@ python -m vmax.scripts.evaluate.evaluate [arguments]
 - `--waymo_dataset` (`-wd`): Use the Waymo dataset. Default: `False`.
 - `--plot-failures` (`-pf`): Plot failed scenarios (accuracy=0) from a previous evaluation. Default: `False`.
 
+
+### 🧠 参数说明
+
+| 参数                   | 简写     | 说明                                                                                                                                            | 默认值                |
+| -------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `--sdc_actor`        | `-sdc` | 要评估的自动驾驶控制器类型：<br>• `ai` → 使用你训练好的智能体（learned policy）<br>• `expert` → 使用专家（ground-truth expert）<br>• `idm` → 使用规则模型（Intelligent Driver Model） | `expert`           |
+| `--max_num_objects`  | `-o`   | 场景中最多包含的对象（车辆、行人等）数量。过大可能影响显存占用。                                                                                                              | `64`               |
+| `--scenario_indexes` | `-si`  | 指定要评估的场景索引列表（如 `--scenario_indexes 0 1 2 3`）。若不指定则评估所有场景。                                                                                     | 所有场景               |
+| `--render`           | `-r`   | 是否渲染评估过程为视频。开启后会生成 `.mp4` 或图片帧。                                                                                                               | `False`            |
+| `--sdc_pov`          | `-pov` | 是否以**自动驾驶车（SDC）视角**渲染视频（第一人称视角）。                                                                                                              | `False`            |
+| `--path_dataset`     | `-pd`  | 数据集路径或名称。例如：`./data/scenariomax/validation_tfexample/*.tfrecord`                                                                              | `local_womd_valid` |
+| `--path_model`       | `-pm`  | 模型路径（仅当 `--sdc_actor ai` 时必须提供）。                                                                                                              | 无                  |
+| `--eval_name`        | `-en`  | 评估结果输出目录名，例如 `--eval_name my_eval`。结果会保存到 `runs/my_eval/` 下。                                                                                  | `benchmark`        |
+| `--noisy_init`       | `-ni`  | 是否启用**带噪初始化**，让初始状态有轻微扰动，用于鲁棒性测试。                                                                                                             | `False`            |
+| `--src_dir`          | `-sd`  | 模型 checkpoint 存放的主目录。                                                                                                                         | `runs`             |
+| `--seed`             | 无      | 随机种子，保证结果可复现。                                                                                                                                 | `0`                |
+| `--batch_size`       | `-bs`  | 同时评估的场景数（并行批大小），取决于显存。                                                                                                                        | `1`                |
+| `--waymo_dataset`    | `-wd`  | 如果你使用 **Waymo Open Motion Dataset** 而非 ScenarioMax 数据，请加此选项。                                                                                  | `False`            |
+| `--plot-failures`    | `-pf`  | 如果之前有评估结果，开启此选项会绘制**失败场景（accuracy=0）**的视频，用于分析问题。                                                                                             | `False`            |
+
+
+
 ## Example Usage
 
 Evaluate a trained AI model:
