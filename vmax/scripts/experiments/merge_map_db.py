@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+"""Merge multi-machine sweep map_db directories into one canonical map_db.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.merge_map_db``
+"""
+
 from __future__ import annotations
 
 import argparse

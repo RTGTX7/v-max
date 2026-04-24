@@ -43,7 +43,7 @@ Use the same code version on both machines.
 Example (Machine A):
 
 ```bash
-python vmax/scripts/experiments/reward_search_manager.py \
+python -m vmax.scripts.experiments.reward_search_manager \
   --root_run_dir /path/to/runs/BC_VEC_LQ_xxx \
   --ckpt_path /path/to/runs/BC_VEC_LQ_xxx/model/model_159764480.pkl \
   --param_space_json /path/to/vmax/config/reward_space_bc_rl_3x3x3.json \

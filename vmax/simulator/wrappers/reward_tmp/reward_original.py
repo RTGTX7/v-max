@@ -1,6 +1,10 @@
 # Copyright 2025 Valeo.
 
-"""Reward functions for the simulator."""
+"""Legacy baseline reward variant.
+
+This file is retained for comparison only. The active reward implementation used
+by the environment is exposed through ``vmax.simulator.wrappers.reward``.
+"""
 
 import jax
 import jax.numpy as jnp

@@ -231,7 +231,7 @@ python -m vmax.scripts.experiments.eval_all_bc_models \
 ### Grid reward search (BC -> PPO warm start)
 
 ```bash
-python vmax/scripts/experiments/reward_search_manager.py \
+python -m vmax.scripts.experiments.reward_search_manager \
   --root_run_dir /path/to/bc_run \
   --ckpt_path /path/to/bc_run/model/model_159764480.pkl \
   --param_space_json /path/to/vmax/config/reward_space_bc_rl_3x3x3.json \

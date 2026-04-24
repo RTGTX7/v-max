@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+"""Random-forest suggestion utility for reward-search experiments.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.rf_bo_suggester``
+"""
+
 from __future__ import annotations
 
 import argparse

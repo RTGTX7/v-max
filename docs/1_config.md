@@ -72,7 +72,7 @@ encoder:
 You can override any parameter directly from the command line. For example:
 
 ```bash
-python vmax/scripts/train.py total_timesteps=1000000 algorithm=sac network/encoder=mlp
+python -m vmax.scripts.training.train total_timesteps=1000000 algorithm=sac network/encoder=mlp
 ```
 
 ---

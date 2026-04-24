@@ -1,6 +1,11 @@
 # Copyright 2025 Valeo.
 
-"""Script to run (and resume) the training process."""
+"""Compatibility training entry point with custom resume-path discovery.
+
+This script exists as an auxiliary wrapper around the standard training flow.
+For normal use, prefer ``vmax/scripts/training/train.py`` or
+``python -m vmax.scripts.training.train``.
+"""
 
 import os
 import sys

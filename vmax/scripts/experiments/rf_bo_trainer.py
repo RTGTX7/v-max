@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+"""Random-forest BO training loop for reward-search experiments.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.rf_bo_trainer``
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -15,15 +21,26 @@ from typing import Dict, Iterable, Tuple
 import numpy as np
 import pandas as pd
 
-from rf_bo_suggester import (
-    load_data,
-    fit_rf,
-    sample_candidates,
-    _min_dist_filter,
-    _to_space,
-    compute_ei,
-    pick_batch,
-)
+try:
+    from .rf_bo_suggester import (
+        load_data,
+        fit_rf,
+        sample_candidates,
+        _min_dist_filter,
+        _to_space,
+        compute_ei,
+        pick_batch,
+    )
+except ImportError:
+    from rf_bo_suggester import (  # type: ignore
+        load_data,
+        fit_rf,
+        sample_candidates,
+        _min_dist_filter,
+        _to_space,
+        compute_ei,
+        pick_batch,
+    )
 
 
 @dataclass

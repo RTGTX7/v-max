@@ -1,4 +1,10 @@
 #!/usr/bin/env python
+"""Rebuild trial tables from stored sweep outputs.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.rebuild_trials_from_results``
+"""
+
 from __future__ import annotations
 
 import argparse

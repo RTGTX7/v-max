@@ -114,18 +114,23 @@ Datasets processed via ScenarioMax with SDC paths are available on HuggingFace:
 Train any RL/IL algorithm and network encoder implemented in V-Max:
 
 ```bash
-python vmax/scripts/training/train.py total_timesteps=$num_env_steps path_dataset="" algorithm=$alg_type network/encoder=$encoder_type
+python -m vmax.scripts.training.train total_timesteps=$num_env_steps path_dataset="" algorithm=$alg_type network/encoder=$encoder_type
 ```
 
-- See [`docs/training.md`](docs/training.md) for detailed training, feature selection, reward metrics, and configuration options.
+- See [docs/README.md](docs/README.md) for the documentation index and [docs/USAGE_GUIDE.md](docs/USAGE_GUIDE.md) for the practical workflow.
 
 
 ## Documentation
 
-- [Training & Configurations](docs/training.md)
-- [Metrics](docs/metrics.md)
-- [Observation Wrappers](docs/observations.md)
-- [Simulator Overview](docs/v-max.md)
+- [Documentation Index](docs/README.md)
+- [Usage Guide](docs/USAGE_GUIDE.md)
+- [Configuration Guide](docs/1_config.md)
+- [Training Pipeline](docs/2_training_pipeline.md)
+- [Observation Guide](docs/3_observation.md)
+- [Reward Guide](docs/4_reward.md)
+- [Metrics Guide](docs/5_metrics.md)
+- [Evaluation Guide](docs/6_evaluation.md)
+- [Multi-Machine Search](docs/7_multi_machine_search.md)
 
 
 ## Authors

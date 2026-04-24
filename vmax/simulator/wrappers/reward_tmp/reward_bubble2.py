@@ -1,6 +1,11 @@
 # Copyright 2025 Valeo.
 
-"""Reward functions for the simulator."""
+"""Active project-specific reward implementation.
+
+The canonical public import path is ``vmax.simulator.wrappers.reward``. This
+module contains the current multiplicative reward, route-safe shaping, and
+termination-switch logic used by the environment.
+"""
 
 from __future__ import annotations
 

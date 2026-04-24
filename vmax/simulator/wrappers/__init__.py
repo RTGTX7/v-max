@@ -14,7 +14,7 @@ from .interfaces.multi_agent import MultiAgentBraxWrapper
 from .observation import ObservationWrapper
 
 # Reward wrappers
-from vmax.simulator.wrappers.reward_tmp.reward_bubble2 import RewardCustomWrapper, RewardLinearWrapper
+from .reward import RewardCustomWrapper, RewardLinearWrapper
 
 # State modification wrappers
 from .state.noisy_init import NoisyInitWrapper

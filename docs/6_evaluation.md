@@ -1,90 +1,128 @@
-# Evaluation Script Documentation
+# V-Max Evaluation Guide
 
-This document explains how to use the V-Max evaluation script, its workflow, and the available arguments. It is intended for newcomers and users who want to evaluate trained models or rule-based agents on driving scenarios.
+This document explains how to run evaluation in the current repository, what arguments matter, and where outputs are written.
 
-## Overview
+## 1. Evaluation Entry Point
 
-The evaluation script allows you to assess the performance of a policy (either a learned model or a rule-based agent) on a dataset of driving scenarios. It supports batch evaluation, rendering of episodes, and saving of results and videos.
+The main evaluation script is:
 
-## How Evaluation Works
+- `vmax/scripts/evaluate/evaluate.py`
 
-1. **Setup**: The script sets up the simulation environment and loads the specified policy (AI or rule-based).
-2. **Data Generation**: It loads scenarios from the chosen dataset, batching them if requested.
-3. **Simulation**: For each scenario, the policy is run in the environment, and metrics are collected.
-4. **Rendering (Optional)**: If enabled, the script renders each episode as a video.
-5. **Results**: Aggregated metrics and per-scenario results are saved to disk for analysis.
+It supports:
 
-## Running the Evaluation Script
+- learned policies
+- expert replay
+- rule-based actors such as IDM
+- batched evaluation over logged scenarios
+- optional rendering
 
-You can run the evaluation script from the command line:
+## 2. What Evaluation Does
+
+The evaluation workflow is:
+
+1. load the dataset
+2. build the simulator environment
+3. load the requested actor or model
+4. roll out each scenario in closed loop
+5. collect per-scenario metrics
+6. aggregate results and write them to disk
+
+If rendering is enabled, the evaluation also writes video outputs.
+
+## 3. Command Format
+
+The script is typically launched as:
 
 ```bash
 python -m vmax.scripts.evaluate.evaluate [arguments]
 ```
 
-## Arguments
+## 4. Main Arguments
 
-- `--sdc_actor` (`-sdc`): Type of actor to evaluate. Use `ai` for a learned policy, or a rule-based type (e.g., `expert`, `idm`). Default: `expert`.
-- `--max_num_objects` (`-o`): Maximum number of objects in the scene. Default: `64`.
-- `--scenario_indexes` (`-si`): List of scenario indexes to evaluate. If not set, evaluates all scenarios.
-- `--render` (`-r`): Whether to render the evaluation as videos. Default: `False`.
-- `--sdc_pov` (`-pov`): Render from the self-driving car's point of view. Default: `False`.
-- `--path_dataset` (`-pd`): Path or name of the dataset to use. Default: `local_womd_valid`.
-- `--path_model` (`-pm`): Path to the trained model (required if `--sdc_actor ai`).
-- `--eval_name` (`-en`): Name or directory for evaluation outputs. Default: `benchmark`.
-- `--noisy_init` (`-ni`): Enable noisy initialization for scenarios. Default: `False`.
-- `--src_dir` (`-sd`): Source directory for model checkpoints. Default: `runs`.
-- `--seed`: Random seed for reproducibility. Default: `0`.
-- `--batch_size` (`-bs`): Number of scenarios to process in parallel. Default: `1`.
-- `--waymo_dataset` (`-wd`): Use the Waymo dataset. Default: `False`.
-- `--plot-failures` (`-pf`): Plot failed scenarios (accuracy=0) from a previous evaluation. Default: `False`.
+| Argument | Meaning | Notes |
+|---|---|---|
+| `--sdc_actor` | actor type to evaluate | `ai`, `expert`, `idm`, ... |
+| `--path_dataset` | dataset path or dataset alias | required for reproducible runs |
+| `--path_model` | checkpoint path for learned policy | required when `--sdc_actor ai` |
+| `--batch_size` | number of scenarios processed in parallel | keep small when rendering |
+| `--render` | render evaluation videos | usually set `batch_size=1` |
+| `--sdc_pov` | render from ego point of view | optional |
+| `--scenario_indexes` | evaluate selected scenarios only | useful for debugging |
+| `--eval_name` | output directory name | controls result folder naming |
+| `--seed` | evaluation seed | useful for reproducibility |
+| `--plot-failures` | replay failure cases from previous results | debugging tool |
 
+## 5. Typical Commands
 
-### 🧠 参数说明
-
-| 参数                   | 简写     | 说明                                                                                                                                            | 默认值                |
-| -------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| `--sdc_actor`        | `-sdc` | 要评估的自动驾驶控制器类型：<br>• `ai` → 使用你训练好的智能体（learned policy）<br>• `expert` → 使用专家（ground-truth expert）<br>• `idm` → 使用规则模型（Intelligent Driver Model） | `expert`           |
-| `--max_num_objects`  | `-o`   | 场景中最多包含的对象（车辆、行人等）数量。过大可能影响显存占用。                                                                                                              | `64`               |
-| `--scenario_indexes` | `-si`  | 指定要评估的场景索引列表（如 `--scenario_indexes 0 1 2 3`）。若不指定则评估所有场景。                                                                                     | 所有场景               |
-| `--render`           | `-r`   | 是否渲染评估过程为视频。开启后会生成 `.mp4` 或图片帧。                                                                                                               | `False`            |
-| `--sdc_pov`          | `-pov` | 是否以**自动驾驶车（SDC）视角**渲染视频（第一人称视角）。                                                                                                              | `False`            |
-| `--path_dataset`     | `-pd`  | 数据集路径或名称。例如：`./data/scenariomax/validation_tfexample/*.tfrecord`                                                                              | `local_womd_valid` |
-| `--path_model`       | `-pm`  | 模型路径（仅当 `--sdc_actor ai` 时必须提供）。                                                                                                              | 无                  |
-| `--eval_name`        | `-en`  | 评估结果输出目录名，例如 `--eval_name my_eval`。结果会保存到 `runs/my_eval/` 下。                                                                                  | `benchmark`        |
-| `--noisy_init`       | `-ni`  | 是否启用**带噪初始化**，让初始状态有轻微扰动，用于鲁棒性测试。                                                                                                             | `False`            |
-| `--src_dir`          | `-sd`  | 模型 checkpoint 存放的主目录。                                                                                                                         | `runs`             |
-| `--seed`             | 无      | 随机种子，保证结果可复现。                                                                                                                                 | `0`                |
-| `--batch_size`       | `-bs`  | 同时评估的场景数（并行批大小），取决于显存。                                                                                                                        | `1`                |
-| `--waymo_dataset`    | `-wd`  | 如果你使用 **Waymo Open Motion Dataset** 而非 ScenarioMax 数据，请加此选项。                                                                                  | `False`            |
-| `--plot-failures`    | `-pf`  | 如果之前有评估结果，开启此选项会绘制**失败场景（accuracy=0）**的视频，用于分析问题。                                                                                             | `False`            |
-
-
-
-## Example Usage
-
-Evaluate a trained AI model:
+### Evaluate a trained policy
 
 ```bash
-python -m vmax.scripts.evaluate.evaluate --sdc_actor ai --path_model name_of_the_run --path_dataset womd_valid --batch_size 8
+python -m vmax.scripts.evaluate.evaluate \
+  --sdc_actor ai \
+  --path_model /path/to/model_final.pkl \
+  --path_dataset /path/to/eval.tfrecord \
+  --batch_size 8
 ```
 
-Render failed scenarios from a previous evaluation:
+### Evaluate the expert policy
 
 ```bash
-python -m vmax.scripts.evaluate.evaluate --sdc_actor ai --path_model name_of_the_run --plot-failures
+python -m vmax.scripts.evaluate.evaluate \
+  --sdc_actor expert \
+  --path_dataset /path/to/eval.tfrecord
 ```
 
-## Output Files
+### Render selected scenarios
 
-- `evaluation_episodes.csv`: Per-scenario metrics.
-- `evaluation_results.txt`: Aggregated metrics summary.
-- `mp4/`: Directory containing rendered videos (if rendering is enabled).
+```bash
+python -m vmax.scripts.evaluate.evaluate \
+  --sdc_actor ai \
+  --path_model /path/to/model_final.pkl \
+  --path_dataset /path/to/eval.tfrecord \
+  --scenario_indexes 0 3 5 \
+  --render \
+  --batch_size 1
+```
 
-## Tips
+## 6. Output Files
 
-- When rendering (`--render` or `--sdc_pov`), set `--batch_size 1`.
-- For AI policies, always provide `--path_model`.
-- Use `--scenario_indexes` to evaluate specific scenarios.
+The evaluation pipeline typically writes:
 
-For more details, see the code in `vmax/scripts/evaluate/evaluate.py` and `vmax/scripts/evaluate/utils.py`.
+- `evaluation_episodes.csv`: per-scenario metrics
+- `evaluation_results.txt`: aggregated summary metrics
+- `mp4/`: rendered videos when rendering is enabled
+
+These files are the main artifacts to keep when reporting experimental results.
+
+## 7. Metrics Used in Evaluation
+
+The exact metric set depends on the collector configuration, but the standard workflow includes:
+
+- safety metrics such as off-road, overlap, at-fault collision, and red-light violations
+- progress metrics such as progression and progress ratio
+- comfort and TTC-related metrics
+- aggregate benchmark scores such as V-Max and nuPlan-style summaries
+
+For metric definitions, see:
+
+- `docs/5_metrics.md`
+
+## 8. Practical Recommendations
+
+- keep `batch_size=1` when rendering
+- always record the exact `path_model` and `path_dataset` used for published results
+- use `scenario_indexes` for targeted debugging before launching a full benchmark run
+- treat `evaluation_results.txt` as the summary artifact and `evaluation_episodes.csv` as the diagnostic artifact
+
+## 9. What to Report in a Paper
+
+For a reproducible academic result, record at least:
+
+- the checkpoint path or checkpoint selection rule
+- the evaluation dataset or split
+- the actor type
+- the batch size
+- whether rendering or noisy initialization was enabled
+- the exact command used
+
+Without this information, other users will have difficulty reproducing the evaluation.

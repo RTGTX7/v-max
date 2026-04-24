@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Recompute grade in trials_long.csv and regenerate aggregates."""
+"""Recompute grade in trials_long.csv and regenerate aggregates.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.recompute_grade``
+"""
 from __future__ import annotations
 
 import argparse

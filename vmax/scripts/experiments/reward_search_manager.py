@@ -4,7 +4,7 @@
 """Reward sweep manager with persistent map DB and dedup.
 
 Usage examples:
-  python vmax/scripts/experiments/reward_search_manager.py \
+  python -m vmax.scripts.experiments.reward_search_manager \
     --root_run_dir /path/to/stage1_run \
     --ckpt_path /path/to/model_final.pkl \
     --param_space_json /path/to/space.json \

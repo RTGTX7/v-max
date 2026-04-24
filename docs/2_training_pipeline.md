@@ -96,15 +96,15 @@ This document explains how training is launched, how data flows through the syst
 **Examples**
 ```
 # Start PPO
-python vmax/scripts/training/train.py algorithm=ppo total_timesteps=1000000
+python -m vmax.scripts.training.train algorithm=ppo total_timesteps=1000000
 
 # Resume full
-python vmax/scripts/training/train.py algorithm=ppo \
+python -m vmax.scripts.training.train algorithm=ppo \
   resume.enabled=true resume.ckpt_path=/path/to/checkpoint_1000000.pkl \
   resume.mode=full
 
 # Resume weights only
-python vmax/scripts/training/train.py algorithm=ppo \
+python -m vmax.scripts.training.train algorithm=ppo \
   resume.enabled=true resume.ckpt_path=/path/to/model_final.pkl \
   resume.mode=weights_only resume.strict=false
 ```
@@ -157,7 +157,7 @@ Purpose:
 
 **Run (coarse‑to‑fine grid)**
 ```
-python vmax/scripts/experiments/reward_search_manager.py \
+python -m vmax.scripts.experiments.reward_search_manager \
   --root_run_dir /path/to/stage1_run \
   --ckpt_path /path/to/stage1_run/model/model_final.pkl \
   --param_space_json vmax/config/reward_space.json \
@@ -172,7 +172,7 @@ Notes:
 
 **Run (simple grid)**
 ```
-python vmax/scripts/experiments/reward_search_manager.py \
+python -m vmax.scripts.experiments.reward_search_manager \
   --root_run_dir /path/to/stage1_run \
   --ckpt_path /path/to/stage1_run/model/model_final.pkl \
   --param_space_json vmax/config/reward_space.json \
@@ -203,7 +203,7 @@ Purpose:
 
 **Generate suggestions only**
 ```
-python vmax/scripts/experiments/rf_bo_suggester.py \
+python -m vmax.scripts.experiments.rf_bo_suggester \
   --trials_csv /path/to/root_run_dir/map_db/trials_long.csv \
   --out_csv /path/to/root_run_dir/map_db/suggestions.csv \
   --map_png /path/to/root_run_dir/map_db/map_rfbo.png \
@@ -223,7 +223,7 @@ Output:
 
 **Auto‑train loop (RF‑BO + train.py)**
 ```
-python vmax/scripts/experiments/rf_bo_trainer.py \
+python -m vmax.scripts.experiments.rf_bo_trainer \
   --root_run_dir /path/to/stage1_run \
   --ckpt_path /path/to/stage1_run/model/model_final.pkl \
   --rounds 40 \

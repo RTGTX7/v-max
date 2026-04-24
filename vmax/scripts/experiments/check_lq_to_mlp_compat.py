@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 # Copyright 2025 Valeo.
 
-"""Check LQ -> MLP PPO parameter compatibility without training."""
+"""Check LQ -> MLP PPO parameter compatibility without training.
+
+Canonical invocation:
+- ``python -m vmax.scripts.experiments.check_lq_to_mlp_compat``
+"""
 
 from __future__ import annotations
 

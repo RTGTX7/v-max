@@ -1,7 +1,11 @@
 # Copyright 2025 Valeo.
 
 
-"""Reward functions for the simulator."""
+"""Legacy experimental reward variant.
+
+This file is retained for comparison only. The active reward implementation used
+by the environment is exposed through ``vmax.simulator.wrappers.reward``.
+"""
 
 
 from __future__ import annotations
