@@ -143,6 +143,12 @@ def _score_from_signed_m_inside_only(
     return jnp.where(pen_m > 0.0, score_in, 1.0)
 
 
+def _masked_min_score(score: jax.Array, valid_non_sdc: jax.Array) -> jax.Array:
+    """Return the worst score over valid non-ego object slots only."""
+    masked_score = jnp.where(valid_non_sdc[..., None], score, 1.0)
+    return jnp.min(masked_score).astype(jnp.float32)
+
+
 def soft_safe_bubble_score(
     state: datatypes.SimulatorState,
     # ---- bubble shape knobs ----
@@ -284,7 +290,7 @@ def soft_safe_bubble_score(
         # direction off => neutral
         score = jnp.where(allow_dir, score, 1.0)
 
-        return jnp.min(score).astype(jnp.float32)
+        return _masked_min_score(score, others)
 
 
 
